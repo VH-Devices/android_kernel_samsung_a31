@@ -1458,8 +1458,14 @@ static void print_other_cpu_stall(struct rcu_state *rsp, unsigned long gpnum)
 	 * See Documentation/RCU/stallwarn.txt for info on how to debug
 	 * RCU CPU stall warnings.
 	 */
+	check_held_locks(1);
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL1, "INFO: %s detected stalls on CPUs/tasks:",
+		   rsp->name);
+#else
 	pr_err("INFO: %s detected stalls on CPUs/tasks:",
 	       rsp->name);
+#endif
 	print_cpu_stall_info_begin();
 	rcu_for_each_leaf_node(rsp, rnp) {
 		raw_spin_lock_irqsave_rcu_node(rnp, flags);
@@ -1526,7 +1532,12 @@ static void print_cpu_stall(struct rcu_state *rsp)
 	 * See Documentation/RCU/stallwarn.txt for info on how to debug
 	 * RCU CPU stall warnings.
 	 */
+	check_held_locks(1);
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL1, "INFO: %s self-detected stall on CPU", rsp->name);
+#else
 	pr_err("INFO: %s self-detected stall on CPU", rsp->name);
+#endif
 	print_cpu_stall_info_begin();
 	print_cpu_stall_info(rsp, smp_processor_id());
 	print_cpu_stall_info_end();
@@ -4193,6 +4204,8 @@ static void __init rcu_dump_rcu_node_tree(struct rcu_state *rsp)
 	pr_cont("\n");
 }
 
+struct workqueue_struct *rcu_gp_wq;
+
 void __init rcu_init(void)
 {
 	int cpu;
@@ -4220,6 +4233,10 @@ void __init rcu_init(void)
 		if (IS_ENABLED(CONFIG_TREE_SRCU))
 			srcu_online_cpu(cpu);
 	}
+
+	/* Create workqueue for expedited GPs and for Tree SRCU. */
+	rcu_gp_wq = alloc_workqueue("rcu_gp", WQ_MEM_RECLAIM, 0);
+	WARN_ON(!rcu_gp_wq);
 }
 
 #include "tree_exp.h"

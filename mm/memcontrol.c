@@ -2804,6 +2804,43 @@ static void tree_events(struct mem_cgroup *memcg, unsigned long *events)
 	}
 }
 
+#ifdef CONFIG_MEMCG_HEIMDALL
+static ssize_t mem_cgroup_force_shrink_write(struct kernfs_open_file *of,
+					    char *buf, size_t nbytes,
+					    loff_t off)
+{
+	int type;
+	unsigned long size;
+	char *str;
+	int ret = -EINVAL;
+	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
+
+	if (mem_cgroup_is_root(memcg))
+		goto error;
+
+	buf = strstrip(buf);
+	str = strchr(buf, ',');
+	if (str == NULL)
+		goto error;
+
+	*str = '\0';
+	ret = kstrtoul(str+1, 10, &size);
+	if (ret)
+		goto error;
+
+	ret = kstrtoint(buf, 10, &type);
+	if (ret)
+		goto error;
+
+	if (type > 0 && type <= MEMCG_HEIMDALL_SHRINK_FILE)
+		forced_shrink_node_memcg(NODE_DATA(0), memcg, type, size / PAGE_SIZE);
+
+error:
+	return ret ?: nbytes;
+}
+#endif
+
+#ifndef CONFIG_MTK_GMO_RAM_OPTIMIZE
 static unsigned long mem_cgroup_usage(struct mem_cgroup *memcg, bool swap)
 {
 	unsigned long val = 0;
@@ -2818,13 +2855,55 @@ static unsigned long mem_cgroup_usage(struct mem_cgroup *memcg, bool swap)
 				val += memcg_page_state(iter, MEMCG_SWAP);
 		}
 	} else {
+#ifdef CONFIG_MEMCG_HEIMDALL
+		val = memcg_page_state(memcg, MEMCG_RSS);
+		if (swap)
+			val += memcg_page_state(memcg, MEMCG_SWAP);
+#else
 		if (!swap)
 			val = page_counter_read(&memcg->memory);
 		else
 			val = page_counter_read(&memcg->memsw);
+#endif
 	}
 	return val;
 }
+#else
+static unsigned long mem_cgroup_usage(struct mem_cgroup *memcg, bool swap)
+{
+	unsigned long val;
+
+	if (mem_cgroup_is_root(memcg)) {
+		/*
+		 * For root memcg, using the following statistics to
+		 * evaluate "memory" & "memsw". This can help reduce
+		 * the CPU loading when iterating mem_cgroup_tree.
+		 */
+		val = global_node_page_state(NR_INACTIVE_ANON) +
+		      global_node_page_state(NR_ACTIVE_ANON) +
+		      global_node_page_state(NR_INACTIVE_FILE) +
+		      global_node_page_state(NR_ACTIVE_FILE) +
+		      global_node_page_state(NR_UNEVICTABLE);
+		if (swap) {
+			val += total_swap_pages -
+			       get_nr_swap_pages() -
+			       total_swapcache_pages();
+		}
+	} else {
+#ifdef CONFIG_MEMCG_HEIMDALL
+		val = memcg_page_state(memcg, MEMCG_RSS);
+		if (swap)
+			val += memcg_page_state(memcg, MEMCG_SWAP);
+#else
+		if (!swap)
+			val = page_counter_read(&memcg->memory);
+		else
+			val = page_counter_read(&memcg->memsw);
+#endif
+	}
+	return val;
+}
+#endif
 
 enum {
 	RES_USAGE,
@@ -3310,8 +3389,10 @@ static int mem_cgroup_swappiness_write(struct cgroup_subsys_state *css,
 {
 	struct mem_cgroup *memcg = mem_cgroup_from_css(css);
 
+#ifndef CONFIG_MTK_GMO_RAM_OPTIMIZE
 	if (val > 100)
 		return -EINVAL;
+#endif
 
 	if (css->parent)
 		memcg->swappiness = val;
@@ -4061,6 +4142,12 @@ static struct cftype mem_cgroup_legacy_files[] = {
 		.seq_show = memcg_numa_stat_show,
 	},
 #endif
+#ifdef CONFIG_MEMCG_HEIMDALL
+	{
+		.name = "force_shrink",
+		.write = mem_cgroup_force_shrink_write,
+	},
+#endif
 	{
 		.name = "kmem.limit_in_bytes",
 		.private = MEMFILE_PRIVATE(_KMEM, RES_LIMIT),
@@ -4243,6 +4330,8 @@ static void __mem_cgroup_free(struct mem_cgroup *memcg)
 	for_each_node(node)
 		free_mem_cgroup_per_node_info(memcg, node);
 	free_percpu(memcg->stat);
+	/* poison memcg before freeing it */
+	memset(memcg, 0x78, sizeof(struct mem_cgroup));
 	kfree(memcg);
 }
 

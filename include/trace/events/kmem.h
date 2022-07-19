@@ -318,6 +318,130 @@ TRACE_EVENT(mm_page_alloc_extfrag,
 		__entry->change_ownership)
 );
 
+DECLARE_EVENT_CLASS(ion_rbin,
+
+	TP_PROTO(const char *heap_name,
+		 void *buffer,
+		 unsigned long size,
+		 void *page),
+	TP_ARGS(heap_name, buffer, size, page),
+
+	TP_STRUCT__entry(
+		__field(	const char *,	heap_name)
+		__field(	void *,		buffer	)
+		__field(	unsigned long,	size	)
+		__field(	void *,		page	)
+	),
+
+	TP_fast_assign(
+		__entry->heap_name	= heap_name;
+		__entry->buffer		= buffer;
+		__entry->size		= size;
+		__entry->page		= page;
+	),
+
+	TP_printk("heap_name=%s buffer=%p size=%lu page=%p",
+		__entry->heap_name,
+		__entry->buffer,
+		__entry->size,
+		__entry->page
+	)
+);
+
+DEFINE_EVENT(ion_rbin, ion_rbin_alloc_start,
+	TP_PROTO(const char *heap_name, void *buffer, unsigned long size,
+		 void *page),
+
+	TP_ARGS(heap_name, buffer, size, page)
+);
+
+DEFINE_EVENT(ion_rbin, ion_rbin_alloc_end,
+	TP_PROTO(const char *heap_name, void *buffer, unsigned long size,
+		 void *page),
+
+	TP_ARGS(heap_name, buffer, size, page)
+);
+
+DEFINE_EVENT(ion_rbin, ion_rbin_free_start,
+	TP_PROTO(const char *heap_name, void *buffer, unsigned long size,
+		 void *page),
+
+	TP_ARGS(heap_name, buffer, size, page)
+);
+
+DEFINE_EVENT(ion_rbin, ion_rbin_free_end,
+	TP_PROTO(const char *heap_name, void *buffer, unsigned long size,
+		 void *page),
+
+	TP_ARGS(heap_name, buffer, size, page)
+);
+
+DEFINE_EVENT(ion_rbin, ion_rbin_partial_alloc_start,
+	TP_PROTO(const char *heap_name, void *buffer, unsigned long size,
+		 void *page),
+
+	TP_ARGS(heap_name, buffer, size, page)
+);
+
+DEFINE_EVENT(ion_rbin, ion_rbin_partial_alloc_end,
+	TP_PROTO(const char *heap_name, void *buffer, unsigned long size,
+		 void *page),
+
+	TP_ARGS(heap_name, buffer, size, page)
+);
+
+DEFINE_EVENT(ion_rbin, ion_rbin_partial_free_start,
+	TP_PROTO(const char *heap_name, void *buffer, unsigned long size,
+		 void *page),
+
+	TP_ARGS(heap_name, buffer, size, page)
+);
+
+DEFINE_EVENT(ion_rbin, ion_rbin_partial_free_end,
+	TP_PROTO(const char *heap_name, void *buffer, unsigned long size,
+		 void *page),
+
+	TP_ARGS(heap_name, buffer, size, page)
+);
+
+
+DEFINE_EVENT(ion_rbin, ion_rbin_pool_alloc_start,
+
+	TP_PROTO(const char *heap_name, void *buffer, unsigned long size,
+		 void *page),
+
+	TP_ARGS(heap_name, buffer, size, page)
+);
+
+DEFINE_EVENT(ion_rbin, ion_rbin_pool_alloc_end,
+
+	TP_PROTO(const char *heap_name, void *buffer, unsigned long size,
+		 void *page),
+
+	TP_ARGS(heap_name, buffer, size, page)
+);
+
+TRACE_EVENT(rss_stat,
+
+	TP_PROTO(int member,
+		long count),
+
+	TP_ARGS(member, count),
+
+	TP_STRUCT__entry(
+		__field(int, member)
+		__field(long, size)
+	),
+
+	TP_fast_assign(
+		__entry->member = member;
+		__entry->size = (count << PAGE_SHIFT);
+	),
+
+	TP_printk("member=%d size=%ldB",
+		__entry->member,
+		__entry->size)
+	);
 #endif /* _TRACE_KMEM_H */
 
 /* This part must be outside protection */

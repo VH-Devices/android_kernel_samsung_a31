@@ -46,7 +46,11 @@ struct blk_stat_callback;
 struct keyslot_manager;
 
 #define BLKDEV_MIN_RQ	4
-#define BLKDEV_MAX_RQ	128	/* Default maximum */
+#ifdef CONFIG_LARGE_DIRTY_BUFFER
+#define BLKDEV_MAX_RQ	256
+#else
+#define BLKDEV_MAX_RQ  128     /* Default maximum */
+#endif
 
 /* Must be consisitent with blk_mq_poll_stats_bkt() */
 #define BLK_MQ_POLL_STATS_BKTS 16
@@ -402,6 +406,95 @@ static inline int blkdev_reset_zones_ioctl(struct block_device *bdev,
 
 #endif /* CONFIG_BLK_DEV_ZONED */
 
+#ifdef CONFIG_BLK_IO_VOLUME
+struct block_io_volume {
+	int			queuing_rqs;
+	long long		queuing_bytes;
+
+	/*
+	 * volume count of I/O amount(rqs, bytes) per I/O session.
+	 * I/O session starts when first I/O is incoming into queue,
+	 * and finishes when last I/O is outgoing from queue.
+	 */
+	unsigned int		peak_rqs;
+	unsigned int		peak_rqs_cnt[4];
+	unsigned int		peak_bytes;
+	unsigned int		peak_bytes_cnt[4];
+};
+
+// WRITE : 1, READ : 0
+#define BLK_MAX_IO_VOLS	2
+#define blk_io_vol_rqs(q, op)		((q)->blk_io_vol[(op)&1].queuing_rqs)
+#define blk_io_vol_bytes(q, op)		((q)->blk_io_vol[(op)&1].queuing_bytes)
+#else
+#define blk_io_vol_rqs(q, op)		do {} while (0)
+#define blk_io_vol_bytes(q, op)		do {} while (0)
+#endif
+
+#ifdef CONFIG_BLK_TURBO_WRITE
+typedef void (blk_tw_try_on_fn) (struct request_queue *q);
+typedef void (blk_tw_try_off_fn) (struct request_queue *q);
+
+enum blk_tw_state {
+	TW_OFF = 0,
+	TW_ON_READY,
+	TW_OFF_READY,
+	TW_ON,
+
+	NR_TW_STATE
+};
+
+struct blk_turbo_write {
+	enum blk_tw_state	state;
+	unsigned long		state_ts;
+
+	long long		up_threshold_bytes;
+	int			up_threshold_rqs;
+	long long		down_threshold_bytes;
+	int			down_threshold_rqs;
+
+	/* delay for WB ON in jiffies */
+	int			on_delay;
+	/* delay for WB OFF in jiffies */
+	int			off_delay;
+
+	/* previous TW_ON_READY state timestamp */
+	unsigned long		prev_on_ready_ts;
+	/* TW_ON_READY interval for ON in jiffies */
+	int			on_interval;
+
+	blk_tw_try_on_fn	*try_on;
+	blk_tw_try_off_fn	*try_off;
+
+	/* issued write amount during current TW session */
+	int			curr_issued_kb;
+	/* accumulated write amount in TW sessions */
+	unsigned int		total_issued_mb;
+	/* volume count of write amount per TW session */
+	unsigned int		issued_size_cnt[4];
+};
+
+int blk_alloc_turbo_write(struct request_queue *q);
+void blk_free_turbo_write(struct request_queue *q);
+int blk_register_tw_try_on_fn(struct request_queue *q,
+	blk_tw_try_on_fn *fn);
+int blk_register_tw_try_off_fn(struct request_queue *q,
+	blk_tw_try_off_fn *fn);
+int blk_reset_tw_state(struct request_queue *q);
+void blk_update_tw_state(struct request_queue *q,
+	int write_rqs, long long write_bytes);
+void blk_account_tw_io(struct request_queue *q,
+	int opf, int bytes);
+#else
+#define blk_alloc_turbo_write(q)			do {} while (0)
+#define blk_free_turbo_write(q)				do {} while (0)
+#define blk_register_tw_enable_fn(q, fn)		do {} while (0)
+#define blk_register_tw_disable_fn(q, fn)		do {} while (0)
+#define blk_reset_tw_state(q)				do {} while (0)
+#define blk_update_tw_state(q, write_rqs, write_bytes)	do {} while (0)
+#define blk_account_tw_io(q, opf, bytes)		do {} while (0)
+#endif
+
 struct request_queue {
 	/*
 	 * Together with queue_head for cacheline sharing
@@ -535,6 +628,8 @@ struct request_queue {
 
 	unsigned int		nr_sorted;
 	unsigned int		in_flight[2];
+	unsigned long long	in_flight_time;
+	ktime_t			in_flight_stamp;
 
 	/*
 	 * Number of active block driver functions for which blk_drain_queue()
@@ -581,6 +676,7 @@ struct request_queue {
 	 * for flush operations
 	 */
 	struct blk_flush_queue	*fq;
+	unsigned long		flush_ios;
 
 	struct list_head	requeue_list;
 	spinlock_t		requeue_lock;
@@ -623,6 +719,18 @@ struct request_queue {
 
 #define BLK_MAX_WRITE_HINTS	5
 	u64			write_hints[BLK_MAX_WRITE_HINTS];
+
+#ifdef CONFIG_BLK_IO_VOLUME
+	struct block_io_volume  blk_io_vol[BLK_MAX_IO_VOLS];
+#endif
+
+#ifdef CONFIG_BLK_TURBO_WRITE
+	struct blk_turbo_write  *tw;
+#endif
+
+#ifdef CONFIG_UFSTW
+	bool			turbo_write_dev;
+#endif
 };
 
 #define QUEUE_FLAG_QUEUED	0	/* uses generic tag queueing */
@@ -655,6 +763,7 @@ struct request_queue {
 #define QUEUE_FLAG_REGISTERED  26	/* queue has been registered to a disk */
 #define QUEUE_FLAG_SCSI_PASSTHROUGH 27	/* queue supports SCSI commands */
 #define QUEUE_FLAG_QUIESCED    28	/* queue has been quiesced */
+#define QUEUE_FLAG_INLINECRYPT 29	/* inline crypto support */
 
 #define QUEUE_FLAG_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
 				 (1 << QUEUE_FLAG_STACKABLE)	|	\
@@ -754,6 +863,8 @@ static inline void queue_flag_clear(unsigned int flag, struct request_queue *q)
 #define blk_queue_dax(q)	test_bit(QUEUE_FLAG_DAX, &(q)->queue_flags)
 #define blk_queue_scsi_passthrough(q)	\
 	test_bit(QUEUE_FLAG_SCSI_PASSTHROUGH, &(q)->queue_flags)
+#define blk_queue_inline_crypt(q) \
+	test_bit(QUEUE_FLAG_INLINECRYPT, &(q)->queue_flags)
 
 #define blk_noretry_request(rq) \
 	((rq)->cmd_flags & (REQ_FAILFAST_DEV|REQ_FAILFAST_TRANSPORT| \
@@ -957,6 +1068,7 @@ do {								\
 } while (0)
 #endif
 
+extern void __blk_drain_queue(struct request_queue *q, bool drain_all);
 extern int blk_register_queue(struct gendisk *disk);
 extern void blk_unregister_queue(struct gendisk *disk);
 extern blk_qc_t generic_make_request(struct bio *bio);
@@ -1400,7 +1512,7 @@ extern int blk_verify_command(unsigned char *cmd, fmode_t has_write_perm);
 enum blk_default_limits {
 	BLK_MAX_SEGMENTS	= 128,
 	BLK_SAFE_MAX_SECTORS	= 255,
-	BLK_DEF_MAX_SECTORS	= 2560,
+	BLK_DEF_MAX_SECTORS	= 1024,
 	BLK_MAX_SEGMENT_SIZE	= 65536,
 	BLK_SEG_BOUNDARY_MASK	= 0xFFFFFFFFUL,
 };
@@ -1970,6 +2082,7 @@ struct block_device_operations {
 	int (*getgeo)(struct block_device *, struct hd_geometry *);
 	/* this callback is with swap_lock and sometimes page table lock held */
 	void (*swap_slot_free_notify) (struct block_device *, unsigned long);
+	int (*check_disk_range_wp)(struct gendisk *d, sector_t s, sector_t l);
 	struct module *owner;
 	const struct pr_ops *pr_ops;
 };

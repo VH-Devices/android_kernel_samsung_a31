@@ -29,6 +29,9 @@
 #include <asm/irq_regs.h>
 #include <linux/kvm_para.h>
 #include <linux/kthread.h>
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+#include <linux/sec_debug.h>
+#endif
 
 static DEFINE_MUTEX(watchdog_mutex);
 
@@ -417,14 +420,24 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 			}
 		}
 
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+		pr_auto(ASL9, "BUG: soft lockup - CPU#%d stuck for %us! [%s:%d]\n",
+			smp_processor_id(), duration,
+			current->comm, task_pid_nr(current));
+#else
 		pr_emerg("BUG: soft lockup - CPU#%d stuck for %us! [%s:%d]\n",
 			smp_processor_id(), duration,
 			current->comm, task_pid_nr(current));
+#endif
 		__this_cpu_write(softlockup_task_ptr_saved, current);
 		print_modules();
 		print_irqtrace_events(current);
 		if (regs)
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+			show_regs_auto_comment(regs, !!softlockup_panic);
+#else
 			show_regs(regs);
+#endif
 		else
 			dump_stack();
 
@@ -440,8 +453,15 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 		}
 
 		add_taint(TAINT_SOFTLOCKUP, LOCKDEP_STILL_OK);
-		if (softlockup_panic)
+		if (softlockup_panic) {
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+				if (regs) {
+						sec_debug_set_extra_info_fault((unsigned long)regs->pc, regs);
+						sec_debug_set_extra_info_backtrace(regs);
+				}
+#endif
 			panic("softlockup: hung tasks");
+		}
 		__this_cpu_write(soft_watchdog_warn, true);
 	} else
 		__this_cpu_write(soft_watchdog_warn, false);

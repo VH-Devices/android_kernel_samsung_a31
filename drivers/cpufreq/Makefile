@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
+ifeq ($(cc-name),clang)
+ccflags-y += -Wno-error=unneeded-internal-declaration
+endif
 # CPUfreq core
 obj-$(CONFIG_CPU_FREQ)			+= cpufreq.o freq_table.o
 
@@ -8,12 +11,25 @@ obj-$(CONFIG_CPU_FREQ_STAT)             += cpufreq_stats.o
 # CPUfreq times
 obj-$(CONFIG_CPU_FREQ_TIMES)		+= cpufreq_times.o
 
+# CPUfreq limit API
+ifdef CONFIG_CPU_FREQ_LIMIT
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat/
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include/
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/sched/
+ifdef CONFIG_MACH_MT6739
+obj-y		+= cpufreq_limit_mt6739.o
+else
+obj-y		+= cpufreq_limit.o
+endif
+endif
+
 # CPUfreq governors
 obj-$(CONFIG_CPU_FREQ_GOV_PERFORMANCE)	+= cpufreq_performance.o
 obj-$(CONFIG_CPU_FREQ_GOV_POWERSAVE)	+= cpufreq_powersave.o
 obj-$(CONFIG_CPU_FREQ_GOV_USERSPACE)	+= cpufreq_userspace.o
 obj-$(CONFIG_CPU_FREQ_GOV_ONDEMAND)	+= cpufreq_ondemand.o
 obj-$(CONFIG_CPU_FREQ_GOV_CONSERVATIVE)	+= cpufreq_conservative.o
+obj-$(CONFIG_CPU_FREQ_GOV_INTERACTIVE)	+= cpufreq_interactive.o
 obj-$(CONFIG_CPU_FREQ_GOV_COMMON)		+= cpufreq_governor.o
 obj-$(CONFIG_CPU_FREQ_GOV_ATTR_SET)	+= cpufreq_governor_attr_set.o
 

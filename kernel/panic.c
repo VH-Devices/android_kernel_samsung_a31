@@ -28,6 +28,9 @@
 #include <linux/console.h>
 #include <linux/bug.h>
 #include <linux/ratelimit.h>
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
 
 #define PANIC_TIMER_STEP 100
 #define PANIC_BLINK_SPD 18
@@ -138,7 +141,14 @@ void panic(const char *fmt, ...)
 	int state = 0;
 	int old_cpu, this_cpu;
 	bool _crash_kexec_post_notifiers = crash_kexec_post_notifiers;
+#ifndef CONFIG_MACH_MT6739
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	struct pt_regs regs;
 
+	regs.regs[30] = _RET_IP_;
+	regs.pc = regs.regs[30] - sizeof(unsigned int);
+#endif
+#endif
 	/*
 	 * Disable local interrupts. This will prevent panic_smp_self_stop
 	 * from deadlocking the first cpu that invokes the panic, since
@@ -174,7 +184,24 @@ void panic(const char *fmt, ...)
 	va_start(args, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
+	
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	if (buf[strlen(buf) - 1] == '\n')
+		buf[strlen(buf) - 1] = '\0';
+#endif
+
+#ifndef CONFIG_MACH_MT6739
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	sec_debug_set_extra_info_fault((unsigned long)regs.pc, &regs);
+#endif
+#endif
+
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL5, "Kernel panic - not syncing: %s\n", buf);
+#else
 	pr_emerg("Kernel panic - not syncing: %s\n", buf);
+#endif
+
 #ifdef CONFIG_DEBUG_BUGVERBOSE
 	/*
 	 * Avoid nested stack-dumping if a panic occurs during oops processing
@@ -549,9 +576,11 @@ void __warn(const char *file, int line, void *caller, unsigned taint,
 
 	print_modules();
 
+#ifndef CONFIG_SEC_DEBUG
 	if (regs)
 		show_regs(regs);
 	else
+#endif
 		dump_stack();
 
 	print_oops_end_marker();

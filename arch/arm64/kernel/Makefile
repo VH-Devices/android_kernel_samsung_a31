@@ -12,6 +12,8 @@ CFLAGS_REMOVE_insn.o = -pg
 CFLAGS_REMOVE_return_address.o = -pg
 
 CFLAGS_setup.o = -DUTS_MACHINE='"$(UTS_MACHINE)"'
+ccflags-y += -Idrivers/misc/mediatek/include/
+ccflags-y += -Idrivers/misc/mediatek/mtprof/
 
 # Object file lists.
 arm64-obj-y		:= debug-monitors.o entry.o irq.o fpsimd.o		\
@@ -60,6 +62,8 @@ arm64-obj-$(CONFIG_SHADOW_CALL_STACK)	+= scs.o
 ifeq ($(CONFIG_KVM),y)
 arm64-obj-$(CONFIG_HARDEN_BRANCH_PREDICTOR)	+= bpi.o
 endif
+
+arm64-obj-$(CONFIG_UH)		+= uh_entry.o
 
 obj-y					+= $(arm64-obj-y) vdso/ probes/
 obj-m					+= $(arm64-obj-m)

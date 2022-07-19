@@ -72,6 +72,7 @@ obj-$(CONFIG_FB_INTEL)          += video/fbdev/intelfb/
 
 obj-$(CONFIG_PARPORT)		+= parport/
 obj-$(CONFIG_NVM)		+= lightnvm/
+obj-$(CONFIG_SPI)               += spi/
 obj-y				+= base/ block/ misc/ mfd/ nfc/
 obj-$(CONFIG_LIBNVDIMM)		+= nvdimm/
 obj-$(CONFIG_DAX)		+= dax/
@@ -84,7 +85,7 @@ obj-y				+= nvme/
 obj-$(CONFIG_ATA)		+= ata/
 obj-$(CONFIG_TARGET_CORE)	+= target/
 obj-$(CONFIG_MTD)		+= mtd/
-obj-$(CONFIG_SPI)		+= spi/
+#obj-$(CONFIG_SPI)		+= spi/
 obj-$(CONFIG_SPMI)		+= spmi/
 obj-$(CONFIG_HSI)		+= hsi/
 obj-y				+= net/
@@ -183,4 +184,49 @@ obj-$(CONFIG_FPGA)		+= fpga/
 obj-$(CONFIG_FSI)		+= fsi/
 obj-$(CONFIG_TEE)		+= tee/
 obj-$(CONFIG_MULTIPLEXER)	+= mux/
+obj-$(CONFIG_TRUSTY)	+= trusty/
+obj-$(CONFIG_SEC_EXT)	+= samsung/
 obj-$(CONFIG_GNSS)		+= gnss/
+
+ifeq ($(CONFIG_MACH_MT6739), y)
+#MTK GED disable SEC_EXT
+ifndef CONFIG_SEC_EXT
+obj-$(CONFIG_DRV_SAMSUNG)   += samsung/
+else
+obj-$(CONFIG_SEC_EXT)	+= samsung/
+endif
+endif
+obj-$(CONFIG_SWITCH)		+= switch/
+
+#Sensor
+obj-$(CONFIG_SENSORS)		+= sensors/
+
+# SPU signature verify
+obj-$(CONFIG_SPU_VERIFY) += spu_verify/
+# uH
+obj-$(CONFIG_UH)		+= uh/
+
+# OLOG
+obj-y				+= kperfmon/
+obj-y += regulator/pmic_class/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += security/samsung/icdrv/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += usb/typec/slsi/common/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += vibrator/common/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += sensorhub/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += security/samsung/five_tee_driver/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += sti/abc/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += input/input_boost/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += security/samsung/tzic/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += muic/common/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += fingerprint/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += usb/typec/slsi/s2mu106/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += usb/typec/manager/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += usb/typec/common/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += mfd/slsi/s2mu106/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += hwmon/sec_thermistor/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += vibrator/slsi/s2mu106/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += regulator/s2mpb03/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += muic/slsi/s2mu106/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += battery/fuelgauge/s2mu106_fuelgauge/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += battery/charger/s2mu106_charger/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += battery/common/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT

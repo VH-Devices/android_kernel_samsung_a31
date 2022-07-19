@@ -44,6 +44,9 @@
 #include <asm/system_misc.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+#include <linux/sec_debug.h>
+#endif
 
 #include <acpi/ghes.h>
 
@@ -55,7 +58,7 @@ struct fault_info {
 	const char *name;
 };
 
-static const struct fault_info fault_info[];
+static struct fault_info fault_info[];
 
 static inline const struct fault_info *esr_to_fault_info(unsigned int esr)
 {
@@ -293,8 +296,18 @@ static void __do_kernel_fault(unsigned long addr, unsigned int esr,
 		msg = "paging request";
 	}
 
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL1, "Unable to handle kernel %s at virtual address %08lx\n", msg,
+		 addr);
+#else
 	pr_alert("Unable to handle kernel %s at virtual address %08lx\n", msg,
 		 addr);
+#endif
+
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	sec_debug_set_extra_info_fault(addr, regs);
+	sec_debug_set_extra_info_esr(esr);
+#endif
 
 	mem_abort_decode(esr);
 
@@ -441,6 +454,34 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 
 	if (is_ttbr0_addr(addr) && is_permission_fault(esr, regs, addr)) {
 		/* regs->orig_addr_limit may be 0 if we entered from EL0 */
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+		if (regs->orig_addr_limit == KERNEL_DS) {
+			pr_auto(ASL1, "Accessing user space memory(%lx) with fs=KERNEL_DS\n", addr);
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+			sec_debug_set_extra_info_fault(addr, regs);
+			sec_debug_set_extra_info_esr(esr);
+#endif
+			die("Accessing user space memory with fs=KERNEL_DS", regs, esr);
+		}
+		
+		if (is_el1_instruction_abort(esr)) {
+			pr_auto(ASL1, "Attempting to execute userspace memory(%lx)\n", addr);
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+			sec_debug_set_extra_info_fault(addr, regs);
+			sec_debug_set_extra_info_esr(esr);
+#endif
+			die("Attempting to execute userspace memory", regs, esr);
+		}
+		
+		if (!search_exception_tables(regs->pc)) {
+			pr_auto(ASL1, "Accessing user space memory(%lx) outside uaccess.h routines\n", addr);
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+			sec_debug_set_extra_info_fault(addr, regs);
+			sec_debug_set_extra_info_esr(esr);
+#endif
+			die("Accessing user space memory outside uaccess.h routines", regs, esr);
+		}
+#else
 		if (regs->orig_addr_limit == KERNEL_DS)
 			die("Accessing user space memory with fs=KERNEL_DS", regs, esr);
 
@@ -449,9 +490,18 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 
 		if (!search_exception_tables(regs->pc))
 			die("Accessing user space memory outside uaccess.h routines", regs, esr);
+#endif
 	}
 
 	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, addr);
+
+	/*
+	 * let's try a speculative page fault without grabbing the
+	 * mmap_sem.
+	 */
+	fault = handle_speculative_fault(mm, addr, mm_flags, vm_flags);
+	if (fault != VM_FAULT_RETRY)
+		goto done;
 
 	/*
 	 * As per x86, we may deadlock here. However, since the kernel only
@@ -502,6 +552,8 @@ retry:
 		}
 	}
 	up_read(&mm->mmap_sem);
+
+done:
 
 	/*
 	 * Handle the "normal" (no error) case first.
@@ -626,9 +678,13 @@ static int do_sea(unsigned long addr, unsigned int esr, struct pt_regs *regs)
 	int ret = 0;
 
 	inf = esr_to_fault_info(esr);
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL1, "Synchronous External Abort: %s (0x%08x) at 0x%016lx\n",
+		inf->name, esr, addr);
+#else
 	pr_err("Synchronous External Abort: %s (0x%08x) at 0x%016lx\n",
 		inf->name, esr, addr);
-
+#endif
 	/*
 	 * Synchronous aborts may interrupt code which had interrupts masked.
 	 * Before calling out into the wider kernel tell the interested
@@ -644,6 +700,13 @@ static int do_sea(unsigned long addr, unsigned int esr, struct pt_regs *regs)
 			nmi_exit();
 	}
 
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	if (!user_mode(regs)) {
+		sec_debug_set_extra_info_fault(addr, regs);
+		sec_debug_set_extra_info_esr(esr);
+	}
+#endif
+
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;
 	info.si_code  = 0;
@@ -656,7 +719,7 @@ static int do_sea(unsigned long addr, unsigned int esr, struct pt_regs *regs)
 	return ret;
 }
 
-static const struct fault_info fault_info[] = {
+static struct fault_info fault_info[] = {
 	{ do_bad,		SIGBUS,  0,		"ttbr address size fault"	},
 	{ do_bad,		SIGBUS,  0,		"level 1 address size fault"	},
 	{ do_bad,		SIGBUS,  0,		"level 2 address size fault"	},
@@ -752,8 +815,20 @@ asmlinkage void __exception do_mem_abort(unsigned long addr, unsigned int esr,
 	if (!inf->fn(addr, esr, regs))
 		return;
 
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL1, "Unhandled fault: %s (0x%08x) at 0x%016lx\n",
+		 inf->name, esr, addr);
+#else
 	pr_alert("Unhandled fault: %s (0x%08x) at 0x%016lx\n",
 		 inf->name, esr, addr);
+#endif
+
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	if (!user_mode(regs)) {
+		sec_debug_set_extra_info_fault(addr, regs);
+		sec_debug_set_extra_info_esr(esr);
+	}
+#endif
 
 	mem_abort_decode(esr);
 
@@ -804,10 +879,24 @@ asmlinkage void __exception do_sp_pc_abort(unsigned long addr,
 	}
 
 	if (show_unhandled_signals && unhandled_signal(tsk, SIGBUS))
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+		pr_auto(ASL1, "%s[%d]: %s exception: pc=%p sp=%p\n",
+					tsk->comm, task_pid_nr(tsk),
+					esr_get_class_string(esr), (void *)regs->pc,
+					(void *)regs->sp);
+#else
 		pr_info_ratelimited("%s[%d]: %s exception: pc=%p sp=%p\n",
 				    tsk->comm, task_pid_nr(tsk),
 				    esr_get_class_string(esr), (void *)regs->pc,
 				    (void *)regs->sp);
+#endif
+
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	if (!user_mode(regs)) {
+		sec_debug_set_extra_info_fault(addr, regs);
+		sec_debug_set_extra_info_esr(esr);
+	}
+#endif
 
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;
@@ -839,7 +928,7 @@ void __init hook_debug_fault_code(int nr,
 				  int (*fn)(unsigned long, unsigned int, struct pt_regs *),
 				  int sig, int code, const char *name)
 {
-	BUG_ON(nr < 0 || nr >= ARRAY_SIZE(debug_fault_info));
+	WARN_ON(nr < 0 || nr >= ARRAY_SIZE(debug_fault_info));
 
 	debug_fault_info[nr].fn		= fn;
 	debug_fault_info[nr].sig	= sig;
@@ -847,7 +936,21 @@ void __init hook_debug_fault_code(int nr,
 	debug_fault_info[nr].name	= name;
 }
 
-asmlinkage int __exception do_debug_exception(unsigned long addr_if_watchpoint,
+#ifdef CONFIG_MEDIATEK_SOLUTION
+void hook_fault_code(int nr,
+		     int (*fn)(unsigned long, unsigned int, struct pt_regs *),
+		     int sig, int code, const char *name)
+{
+	WARN_ON(nr < 0 || nr >= ARRAY_SIZE(fault_info));
+
+	fault_info[nr].fn   = fn;
+	fault_info[nr].sig  = sig;
+	fault_info[nr].code = code;
+	fault_info[nr].name = name;
+}
+#endif
+
+asmlinkage int __exception do_debug_exception(unsigned long addr,
 					      unsigned int esr,
 					      struct pt_regs *regs)
 {
@@ -866,16 +969,16 @@ asmlinkage int __exception do_debug_exception(unsigned long addr_if_watchpoint,
 	if (user_mode(regs) && !is_ttbr0_addr(pc))
 		arm64_apply_bp_hardening();
 
-	if (!inf->fn(addr_if_watchpoint, esr, regs)) {
+	if (!inf->fn(addr, esr, regs)) {
 		rv = 1;
 	} else {
 		pr_alert("Unhandled debug exception: %s (0x%08x) at 0x%016lx\n",
-			 inf->name, esr, pc);
+			 inf->name, esr, addr);
 
 		info.si_signo = inf->sig;
 		info.si_errno = 0;
 		info.si_code  = inf->code;
-		info.si_addr  = (void __user *)pc;
+		info.si_addr  = (void __user *)addr;
 		arm64_notify_die("", regs, &info, 0);
 		rv = 0;
 	}

@@ -571,6 +571,28 @@ ENDPROC(el1_error_invalid)
 	.align	6
 el1_sync:
 	kernel_entry 1
+	mov	x0, sp
+	get_thread_info x20	// top of stack
+	ldr	w4, [x20, #TI_CPU_EXCP]
+	add	w4, w4, #0x1
+	str	w4, [x20, #TI_CPU_EXCP]
+	cmp	w4, #0x1
+	b.ne	el1_sync_nest
+	str	x0, [x20, #TI_REGS_ON_EXCP]
+el1_sync_nest:
+	mrs	x1, esr_el1			// read the syndrome register
+	lsr	x24, x1, #ESR_ELx_EC_SHIFT	// exception class
+	cmp	x24, #ESR_ELx_EC_DABT_CUR	// data abort in EL1
+	b.ne	el1_sync_nest_skip_dec
+	sub	w4, w4, #0x1
+	str	w4, [x20, #TI_CPU_EXCP]
+el1_sync_nest_skip_dec:
+	cmp	w4, #0x2
+	b.lt	el1_sync_nest_skip
+#ifdef CONFIG_MTK_AEE_IPANIC
+	bl	aee_stop_nested_panic
+#endif
+el1_sync_nest_skip:
 	mrs	x1, esr_el1			// read the syndrome register
 	lsr	x24, x1, #ESR_ELx_EC_SHIFT	// exception class
 	cmp	x24, #ESR_ELx_EC_DABT_CUR	// data abort in EL1
@@ -606,6 +628,13 @@ el1_da:
 	untagged_addr x0, x3
 	mov	x2, sp				// struct pt_regs
 	bl	do_mem_abort
+	cmp	x24, #ESR_ELx_EC_DABT_CUR	// data abort in EL1
+	b.eq	el1_da_nest_skip_dec
+	get_thread_info x20	// top of stack
+	ldr	w4, [x20, #TI_CPU_EXCP]
+	sub	w4, w4, #0x1
+	str	w4, [x20, #TI_CPU_EXCP]
+el1_da_nest_skip_dec:
 
 	// disable interrupts before pulling preserved data off the stack
 	disable_irq
@@ -626,7 +655,11 @@ el1_undef:
 	enable_dbg
 	mov	x0, sp
 	bl	do_undefinstr
-	ASM_BUG()
+	get_thread_info x20     // top of stack
+	ldr	w4, [x20, #TI_CPU_EXCP]
+	sub	w4, w4, #0x1
+	str	w4, [x20, #TI_CPU_EXCP]
+	kernel_exit 1
 el1_dbg:
 	/*
 	 * Debug exception handling
@@ -637,6 +670,11 @@ el1_dbg:
 	mrs	x0, far_el1
 	mov	x2, sp				// struct pt_regs
 	bl	do_debug_exception
+	get_thread_info x20	// top of stack
+	ldr	w4, [x20, #TI_CPU_EXCP]
+	sub	w4, w4, #0x1
+	str	w4, [x20, #TI_CPU_EXCP]
+
 	kernel_exit 1
 el1_inv:
 	// TODO: add support for undefined instructions in kernel mode
@@ -947,6 +985,29 @@ el0_svc_naked:					// compat entry point
 	b.ne	__sys_trace
 	cmp     wscno, wsc_nr			// check upper syscall limit
 	b.hs	ni_sys
+#ifdef CONFIG_SECURITY_DEFEX
+/*
+ * Defex enter hook
+ */
+
+	ldr	x16, =defex_syscall_catch_enter
+	ldr	x16, [x16]
+	cmp	x16, xzr
+	b.eq	2f
+	uxtw	x0, wscno  //  it will copy wscno to low bits of x0 and fill high bits with 0
+	mov	x1, sp
+	blr	x16
+
+	cbnz	w0, ret_fast_syscall		// block this syscall?
+#	adr	lr, ret_fast_syscall		// return address (not needed here)
+
+	ldp	x0, x1, [sp]			// restore the syscall args
+	ldp	x2, x3, [sp, #S_X2]
+	ldp	x4, x5, [sp, #S_X4]
+	ldp	x6, x7, [sp, #S_X6]
+
+2:
+#endif
 	mask_nospec64 xscno, xsc_nr, x19	// enforce bounds for syscall number
 	ldr	x16, [stbl, xscno, lsl #3]	// address in the syscall table
 	blr	x16				// call sys_* routine
@@ -974,6 +1035,23 @@ __sys_trace:
 	mov	x1, sp				// pointer to regs
 	cmp	wscno, wsc_nr			// check upper syscall limit
 	b.hs	__ni_sys_trace
+#ifdef CONFIG_SECURITY_DEFEX
+/*
+ * Defex enter hook
+ */
+
+	ldr	x16, =defex_syscall_catch_enter
+	ldr	x16, [x16]
+	cmp	x16, xzr
+	b.eq	3f
+	uxtw	x0, wscno  //  it will copy wscno to low bits of x0 and fill high bits with 0
+	mov	x1, sp
+	blr	x16
+
+	cbnz	w0, __sys_trace_return		// block this syscall?
+#	adr	lr, __sys_trace_return		// return address (not neede here)
+3:
+#endif
 	ldp	x0, x1, [sp]			// restore the syscall args
 	ldp	x2, x3, [sp, #S_X2]
 	ldp	x4, x5, [sp, #S_X4]

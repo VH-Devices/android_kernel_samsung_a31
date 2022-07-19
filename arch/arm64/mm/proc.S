@@ -226,7 +226,13 @@ ENDPROC(idmap_cpu_replace_ttbr1)
 
 	.macro __idmap_kpti_put_pgtable_ent_ng, type
 	orr	\type, \type, #PTE_NG		// Same bit for blocks and pages
+#ifdef CONFIG_UH_RKP
+	mov	x2, \type
+	mov	x1, cur_\()\type\()p	// Update the entry for uH rkp
+	str	x2, [x1]	// Need to check for corruption of each register
+#else
 	str	\type, [cur_\()\type\()p]	// Update the entry and ensure
+#endif
 	dmb	sy				// that it is visible to all
 	dc	civac, cur_\()\type\()p		// CPUs.
 	.endm

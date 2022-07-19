@@ -303,6 +303,11 @@ static struct scsi_device *scsi_alloc_sdev(struct scsi_target *starget,
 		}
 	}
 
+#ifdef CONFIG_BLK_TURBO_WRITE
+	if (!strncmp(shost->hostt->name, "ufshcd", 6))
+		scsi_alloc_tw(sdev);
+#endif
+
 	return sdev;
 
 out_device_destroy:
@@ -968,6 +973,14 @@ static int scsi_add_lun(struct scsi_device *sdev, unsigned char *inq_result,
 		sdev->skip_vpd_pages = 1;
 
 	transport_configure_device(&sdev->sdev_gendev);
+
+	/*
+	 * MTK PATCH:
+	 * The LLD can override auto suspend configuration in ->
+	 * slave_configure().
+	 */
+	sdev->use_rpm_auto = 0;
+	sdev->autosuspend_delay = SCSI_DEFAULT_AUTOSUSPEND_DELAY;
 
 	if (sdev->host->hostt->slave_configure) {
 		ret = sdev->host->hostt->slave_configure(sdev);

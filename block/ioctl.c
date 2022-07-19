@@ -221,6 +221,10 @@ static int blk_ioctl_discard(struct block_device *bdev, fmode_t mode,
 
 	if (start + len > (i_size_read(bdev->bd_inode) >> 9))
 		return -EINVAL;
+	printk("%s %d:%d %llu %llu",
+		(flags & BLKDEV_DISCARD_SECURE) ? "SECDIS" : "DIS",
+		MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev),
+		(unsigned long long)start, (unsigned long long)len);
 	return blkdev_issue_discard(bdev, start, len, GFP_KERNEL, flags);
 }
 
@@ -438,7 +442,7 @@ static int blkdev_roset(struct block_device *bdev, fmode_t mode,
 	int ret, n;
 
 	ret = __blkdev_driver_ioctl(bdev, mode, cmd, arg);
-	if (!is_unrecognized_ioctl(ret))
+	if (ret && !is_unrecognized_ioctl(ret))
 		return ret;
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;

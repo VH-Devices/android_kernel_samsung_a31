@@ -1328,6 +1328,14 @@ void snd_usb_ctl_msg_quirk(struct usb_device *dev, unsigned int pipe,
 	     chip->usb_id == USB_ID(0x0951, 0x16ad)) &&
 	    (requesttype & USB_TYPE_MASK) == USB_TYPE_CLASS)
 		mdelay(1);
+
+	if (chip->usb_id == USB_ID(0x04e8, 0xa051) &&
+	     (requesttype & USB_TYPE_MASK) == USB_TYPE_CLASS)
+#ifdef CONFIG_USB_HOST_SAMSUNG_FEATURE
+		mdelay(1);
+#else
+		mdelay(5);
+#endif
 }
 
 /*

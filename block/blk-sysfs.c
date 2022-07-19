@@ -101,14 +101,23 @@ static ssize_t
 queue_ra_store(struct request_queue *q, const char *page, size_t count)
 {
 	unsigned long ra_kb;
-	ssize_t ret = queue_var_store(&ra_kb, page, count);
+	ssize_t ret;
+	static const char temp[] = "temporary ";
+
+	/* IOPP-ra-v2.1.4.14 */
+	if (strncmp(page, temp, sizeof(temp) - 1) != 0)
+		return count;
+
+	page += sizeof(temp) - 1;
+
+	ret = queue_var_store(&ra_kb, page, count);
 
 	if (ret < 0)
 		return ret;
 
 	q->backing_dev_info->ra_pages = ra_kb >> (PAGE_SHIFT - 10);
 
-	return ret;
+	return count;
 }
 
 static ssize_t queue_max_sectors_show(struct request_queue *q, char *page)
@@ -505,6 +514,11 @@ static ssize_t queue_dax_show(struct request_queue *q, char *page)
 	return queue_var_show(blk_queue_dax(q), page);
 }
 
+static ssize_t queue_inline_crypt_show(struct request_queue *q, char *page)
+{
+	return queue_var_show(blk_queue_inline_crypt(q), page);
+}
+
 static struct queue_sysfs_entry queue_requests_entry = {
 	.attr = {.name = "nr_requests", .mode = S_IRUGO | S_IWUSR },
 	.show = queue_requests_show,
@@ -512,7 +526,7 @@ static struct queue_sysfs_entry queue_requests_entry = {
 };
 
 static struct queue_sysfs_entry queue_ra_entry = {
-	.attr = {.name = "read_ahead_kb", .mode = S_IRUGO | S_IWUSR },
+	.attr = {.name = "read_ahead_kb", .mode = 0644 },
 	.show = queue_ra_show,
 	.store = queue_ra_store,
 };
@@ -662,6 +676,11 @@ static struct queue_sysfs_entry queue_poll_delay_entry = {
 	.store = queue_poll_delay_store,
 };
 
+static struct queue_sysfs_entry queue_inline_crypt_entry = {
+	.attr = {.name = "inline_crypt", .mode = S_IRUGO },
+	.show = queue_inline_crypt_show,
+};
+
 static struct queue_sysfs_entry queue_wc_entry = {
 	.attr = {.name = "write_cache", .mode = S_IRUGO | S_IWUSR },
 	.show = queue_wc_show,
@@ -684,6 +703,391 @@ static struct queue_sysfs_entry throtl_sample_time_entry = {
 	.attr = {.name = "throttle_sample_time", .mode = S_IRUGO | S_IWUSR },
 	.show = blk_throtl_sample_time_show,
 	.store = blk_throtl_sample_time_store,
+};
+#endif
+
+#ifdef CONFIG_BLK_IO_VOLUME
+static ssize_t queue_io_vol_show(struct request_queue *q, char *page)
+{
+	/* not protect with lock (just for data monitoring) */
+	return sprintf(page, "%d,%lld,%d,%lld\n",
+			q->blk_io_vol[REQ_OP_READ].queuing_rqs,
+			q->blk_io_vol[REQ_OP_READ].queuing_bytes,
+			q->blk_io_vol[REQ_OP_WRITE].queuing_rqs,
+			q->blk_io_vol[REQ_OP_WRITE].queuing_bytes);
+}
+
+static struct queue_sysfs_entry queue_io_volume_entry = {
+	.attr = {.name = "io_volume", .mode = 0444},
+	.show = queue_io_vol_show,
+};
+#endif
+
+#ifdef CONFIG_BLK_TURBO_WRITE
+static ssize_t queue_tw_state_show(struct request_queue *q, char *page)
+{
+	struct blk_turbo_write tw;
+	ssize_t ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	tw.state = q->tw->state;
+	tw.state_ts = q->tw->state_ts;
+	spin_unlock_irq(q->queue_lock);
+
+	ret = sprintf(page, "%d,%u\n",
+			tw.state, jiffies_to_msecs(jiffies - tw.state_ts));
+
+	return ret;
+}
+
+static struct queue_sysfs_entry queue_tw_state_entry = {
+	.attr = {.name = "tw_state", .mode = 0444},
+	.show = queue_tw_state_show,
+};
+
+static ssize_t queue_tw_up_threshold_bytes_show(struct request_queue *q,
+	char *page)
+{
+	struct blk_turbo_write tw;
+	ssize_t ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	tw.up_threshold_bytes = q->tw->up_threshold_bytes;
+	spin_unlock_irq(q->queue_lock);
+
+	ret = sprintf(page, "%lld\n", tw.up_threshold_bytes);
+
+	return ret;
+}
+
+static ssize_t queue_tw_up_threshold_bytes_store(struct request_queue *q,
+	const char *page, size_t count)
+{
+	unsigned long val;
+	ssize_t ret;
+
+	ret = queue_var_store(&val, page, count);
+	if (ret < 0)
+		return ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	if (val >= q->tw->down_threshold_bytes)
+		q->tw->up_threshold_bytes = val;
+	spin_unlock_irq(q->queue_lock);
+
+	return ret;
+}
+
+static struct queue_sysfs_entry queue_tw_up_threshold_bytes_entry = {
+	.attr = {.name = "tw_up_threshold_bytes", .mode = 0644},
+	.show = queue_tw_up_threshold_bytes_show,
+	.store = queue_tw_up_threshold_bytes_store,
+};
+
+static ssize_t queue_tw_up_threshold_rqs_show(struct request_queue *q,
+	char *page)
+{
+	struct blk_turbo_write tw;
+	ssize_t ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	tw.up_threshold_rqs = q->tw->up_threshold_rqs;
+	spin_unlock_irq(q->queue_lock);
+
+	ret = sprintf(page, "%d\n", tw.up_threshold_rqs);
+
+	return ret;
+}
+
+static ssize_t queue_tw_up_threshold_rqs_store(struct request_queue *q,
+	const char *page, size_t count)
+{
+	unsigned long val;
+	ssize_t ret;
+
+	ret = queue_var_store(&val, page, count);
+	if (ret < 0)
+		return ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	if (val >= q->tw->down_threshold_rqs)
+		q->tw->up_threshold_rqs = val;
+	spin_unlock_irq(q->queue_lock);
+
+	return ret;
+}
+
+static struct queue_sysfs_entry queue_tw_up_threshold_rqs_entry = {
+	.attr = {.name = "tw_up_threshold_rqs", .mode = 0644},
+	.show = queue_tw_up_threshold_rqs_show,
+	.store = queue_tw_up_threshold_rqs_store,
+};
+
+static ssize_t queue_tw_down_threshold_bytes_show(struct request_queue *q,
+	char *page)
+{
+	struct blk_turbo_write tw;
+	ssize_t ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	tw.down_threshold_bytes = q->tw->down_threshold_bytes;
+	spin_unlock_irq(q->queue_lock);
+
+	ret = sprintf(page, "%lld\n", tw.down_threshold_bytes);
+
+	return ret;
+}
+
+static ssize_t queue_tw_down_threshold_bytes_store(struct request_queue *q,
+	const char *page, size_t count)
+{
+	unsigned long val;
+	ssize_t ret;
+
+	ret = queue_var_store(&val, page, count);
+	if (ret < 0)
+		return ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	if (val <= q->tw->up_threshold_bytes)
+		q->tw->down_threshold_bytes = val;
+	spin_unlock_irq(q->queue_lock);
+
+	return ret;
+}
+
+static struct queue_sysfs_entry queue_tw_down_threshold_bytes_entry = {
+	.attr = {.name = "tw_down_threshold_bytes", .mode = 0644},
+	.show = queue_tw_down_threshold_bytes_show,
+	.store = queue_tw_down_threshold_bytes_store,
+};
+
+static ssize_t queue_tw_down_threshold_rqs_show(struct request_queue *q,
+	char *page)
+{
+	struct blk_turbo_write tw;
+	ssize_t ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	tw.down_threshold_rqs = q->tw->down_threshold_rqs;
+	spin_unlock_irq(q->queue_lock);
+
+	ret = sprintf(page, "%d\n", tw.down_threshold_rqs);
+
+	return ret;
+}
+
+static ssize_t queue_tw_down_threshold_rqs_store(struct request_queue *q,
+	const char *page, size_t count)
+{
+	unsigned long val;
+	ssize_t ret;
+
+	ret = queue_var_store(&val, page, count);
+	if (ret < 0)
+		return ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	if (val <= q->tw->up_threshold_rqs)
+		q->tw->down_threshold_rqs = val;
+	spin_unlock_irq(q->queue_lock);
+
+	return ret;
+}
+
+static struct queue_sysfs_entry queue_tw_down_threshold_rqs_entry = {
+	.attr = {.name = "tw_down_threshold_rqs", .mode = 0644},
+	.show = queue_tw_down_threshold_rqs_show,
+	.store = queue_tw_down_threshold_rqs_store,
+};
+
+static ssize_t queue_tw_on_delay_ms_show(struct request_queue *q,
+	char *page)
+{
+	struct blk_turbo_write tw;
+	ssize_t ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	tw.on_delay = q->tw->on_delay;
+	spin_unlock_irq(q->queue_lock);
+
+	ret = sprintf(page, "%d\n", jiffies_to_msecs(tw.on_delay));
+
+	return ret;
+}
+
+static ssize_t queue_tw_on_delay_ms_store(struct request_queue *q,
+	const char *page, size_t count)
+{
+	unsigned long val;
+	ssize_t ret;
+
+	ret = queue_var_store(&val, page, count);
+	if (ret < 0)
+		return ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	q->tw->on_delay = msecs_to_jiffies(val);
+	spin_unlock_irq(q->queue_lock);
+
+	return ret;
+}
+
+static struct queue_sysfs_entry queue_tw_on_delay_ms_entry = {
+	.attr = {.name = "tw_on_delay_ms", .mode = 0644},
+	.show = queue_tw_on_delay_ms_show,
+	.store = queue_tw_on_delay_ms_store,
+};
+
+static ssize_t queue_tw_on_interval_ms_show(struct request_queue *q,
+	char *page)
+{
+	struct blk_turbo_write tw;
+	ssize_t ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	tw.on_interval = q->tw->on_interval;
+	spin_unlock_irq(q->queue_lock);
+
+	ret = sprintf(page, "%d\n", jiffies_to_msecs(tw.on_interval));
+
+	return ret;
+}
+
+static ssize_t queue_tw_on_interval_ms_store(struct request_queue *q,
+	const char *page, size_t count)
+{
+	unsigned long val;
+	ssize_t ret;
+
+	ret = queue_var_store(&val, page, count);
+	if (ret < 0)
+		return ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	q->tw->on_interval = msecs_to_jiffies(val);
+	spin_unlock_irq(q->queue_lock);
+
+	return ret;
+}
+
+static struct queue_sysfs_entry queue_tw_on_interval_ms_entry = {
+	.attr = {.name = "tw_on_interval_ms", .mode = 0644},
+	.show = queue_tw_on_interval_ms_show,
+	.store = queue_tw_on_interval_ms_store,
+};
+
+static ssize_t queue_tw_off_delay_ms_show(struct request_queue *q,
+	char *page)
+{
+	struct blk_turbo_write tw;
+	ssize_t ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	tw.off_delay = q->tw->off_delay;
+	spin_unlock_irq(q->queue_lock);
+
+	ret = sprintf(page, "%d\n", jiffies_to_msecs(tw.off_delay));
+
+	return ret;
+}
+
+static ssize_t queue_tw_off_delay_ms_store(struct request_queue *q,
+	const char *page, size_t count)
+{
+	unsigned long val;
+	ssize_t ret;
+
+	ret = queue_var_store(&val, page, count);
+	if (ret < 0)
+		return ret;
+
+	spin_lock_irq(q->queue_lock);
+	if (!q->tw) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+
+	q->tw->off_delay = msecs_to_jiffies(val);
+	spin_unlock_irq(q->queue_lock);
+
+	return ret;
+}
+
+static struct queue_sysfs_entry queue_tw_off_delay_ms_entry = {
+	.attr = {.name = "tw_off_delay_ms", .mode = 0644},
+	.show = queue_tw_off_delay_ms_show,
+	.store = queue_tw_off_delay_ms_store,
 };
 #endif
 
@@ -720,8 +1124,22 @@ static struct attribute *default_attrs[] = {
 	&queue_dax_entry.attr,
 	&queue_wb_lat_entry.attr,
 	&queue_poll_delay_entry.attr,
+	&queue_inline_crypt_entry.attr,
 #ifdef CONFIG_BLK_DEV_THROTTLING_LOW
 	&throtl_sample_time_entry.attr,
+#endif
+#ifdef CONFIG_BLK_IO_VOLUME
+	&queue_io_volume_entry.attr,
+#endif
+#ifdef CONFIG_BLK_TURBO_WRITE
+	&queue_tw_state_entry.attr,
+	&queue_tw_up_threshold_bytes_entry.attr,
+	&queue_tw_up_threshold_rqs_entry.attr,
+	&queue_tw_down_threshold_bytes_entry.attr,
+	&queue_tw_down_threshold_rqs_entry.attr,
+	&queue_tw_on_delay_ms_entry.attr,
+	&queue_tw_on_interval_ms_entry.attr,
+	&queue_tw_off_delay_ms_entry.attr,
 #endif
 	NULL,
 };

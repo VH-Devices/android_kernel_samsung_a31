@@ -16,7 +16,17 @@
 #include <crypto/hash.h>
 #include <linux/bio-crypt-ctx.h>
 
+#if defined(CONFIG_FSCRYPT_SDP) || defined(CONFIG_DDAR)
+#include "fscrypt_knox_private.h"
+#endif
+
 #define CONST_STRLEN(str)	(sizeof(str) - 1)
+
+#ifdef CONFIG_FSCRYPT_SDP
+#include "sdp/fscrypto_sdp_private.h"
+#include <sdp/fs_request.h>
+#endif
+
 
 #define FS_KEY_DERIVATION_NONCE_SIZE	16
 
@@ -33,6 +43,9 @@ struct fscrypt_context_v1 {
 	u8 flags;
 	u8 master_key_descriptor[FSCRYPT_KEY_DESCRIPTOR_SIZE];
 	u8 nonce[FS_KEY_DERIVATION_NONCE_SIZE];
+#if defined(CONFIG_FSCRYPT_SDP) || defined(CONFIG_DDAR)
+	u32 knox_flags;
+#endif
 };
 
 struct fscrypt_context_v2 {
@@ -43,6 +56,9 @@ struct fscrypt_context_v2 {
 	u8 __reserved[4];
 	u8 master_key_identifier[FSCRYPT_KEY_IDENTIFIER_SIZE];
 	u8 nonce[FS_KEY_DERIVATION_NONCE_SIZE];
+#if defined(CONFIG_FSCRYPT_SDP) || defined(CONFIG_DDAR)
+	u32 knox_flags;
+#endif
 };
 
 /*
@@ -69,10 +85,18 @@ static inline int fscrypt_context_size(const union fscrypt_context *ctx)
 {
 	switch (ctx->version) {
 	case FSCRYPT_CONTEXT_V1:
+#if defined(CONFIG_FSCRYPT_SDP) || defined(CONFIG_DDAR)
+		BUILD_BUG_ON(sizeof(ctx->v1) != 32);
+#else
 		BUILD_BUG_ON(sizeof(ctx->v1) != 28);
+#endif
 		return sizeof(ctx->v1);
 	case FSCRYPT_CONTEXT_V2:
+#if defined(CONFIG_FSCRYPT_SDP) || defined(CONFIG_DDAR)
+		BUILD_BUG_ON(sizeof(ctx->v2) != 44);
+#else
 		BUILD_BUG_ON(sizeof(ctx->v2) != 40);
+#endif
 		return sizeof(ctx->v2);
 	}
 	return 0;
@@ -246,9 +270,17 @@ struct fscrypt_info {
 
 	/* This inode's nonce, copied from the fscrypt_context */
 	u8 ci_nonce[FS_KEY_DERIVATION_NONCE_SIZE];
-
+#ifdef CONFIG_FSCRYPT_SDP
+	struct sdp_info *ci_sdp_info;
+#endif
 	/* Hashed inode number.  Only set for IV_INO_LBLK_32 */
 	u32 ci_hashed_ino;
+	/*
+	 * This design for eMMC + F2FS security OTA,
+	 * we don't used  "ci_hashed_ino" but a special
+	 * one - "ci_hashed_info" to avoid using confusion.
+	 */
+	u32 ci_hashed_info;
 };
 
 typedef enum {
@@ -610,6 +642,48 @@ int fscrypt_setup_v1_file_key(struct fscrypt_info *ci,
 
 int fscrypt_setup_v1_file_key_via_subscribed_keyrings(struct fscrypt_info *ci);
 
+#ifdef CONFIG_FSCRYPT_SDP
+// functions added for v1 and v2 simultaneous support
+int find_and_derive_v1_fskey_via_subscribed_keyrings(
+					const struct fscrypt_info *ci,
+					struct fscrypt_key *fskey);
+
+int find_and_derive_v1_file_key(
+					struct fscrypt_key *key,
+					struct fscrypt_info *ci,
+					const u8 *raw_master_key);
+
+int find_and_derive_v1_fskey(
+		struct fscrypt_info *crypt_info,
+		struct fscrypt_key *kek);
+
+// In keysetup.c for V1
+int derive_fek_v1(struct inode *inode,
+		struct fscrypt_info *crypt_info,
+		u8 *fek, u32 fek_len);
+
+int derive_essiv_salt_v1(const u8 *key, int keysize, u8 *salt);
+
+static inline bool fscrypt_sdp_protected(const union fscrypt_context *ctx_u) {
+	switch (ctx_u->version) {
+		case FSCRYPT_CONTEXT_V1: {
+			const struct fscrypt_context_v1 *ctx = &ctx_u->v1;
+			if (ctx->knox_flags & FSCRYPT_KNOX_FLG_SDP_MASK) {
+				return true;
+			}
+			break;
+		}
+		case FSCRYPT_CONTEXT_V2: {
+			const struct fscrypt_context_v2 *ctx = &ctx_u->v2;
+			if (ctx->knox_flags & FSCRYPT_KNOX_FLG_SDP_MASK) {
+				return true;
+			}
+			break;
+		}
+	}
+	return false;
+}
+#endif
 /* policy.c */
 
 bool fscrypt_policies_equal(const union fscrypt_policy *policy1,
@@ -619,5 +693,6 @@ bool fscrypt_supported_policy(const union fscrypt_policy *policy_u,
 int fscrypt_policy_from_context(union fscrypt_policy *policy_u,
 				const union fscrypt_context *ctx_u,
 				int ctx_size);
+extern unsigned int get_boot_type(void);
 
 #endif /* _FSCRYPT_PRIVATE_H */

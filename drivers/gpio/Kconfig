@@ -572,6 +572,13 @@ config GPIO_LOONGSON1
 	help
 	  Say Y or M here to support GPIO on Loongson1 SoCs.
 
+config GPIO_PCAL6416A
+	bool "PCAL6416A GPIO expander"
+	depends on I2C
+	default n
+	help
+	  GPIO driver for PCAL6416A I2C-based GPIO expander.
+
 endmenu
 
 menu "Port-mapped I/O GPIO drivers"
@@ -1282,6 +1289,13 @@ config GPIO_XRA1403
 	  GPIO driver for EXAR XRA1403 16-bit SPI-based GPIO expander.
 
 endmenu
+
+config SEC_GPIO_DVS
+	tristate "setting Samsung GPIO debugging and verification system"
+	default n
+	help
+	  To verify gpio configurations of devices, set this feature.
+	  This feature should be enabled for user-debug mode.
 
 menu "USB GPIO expanders"
 	depends on USB

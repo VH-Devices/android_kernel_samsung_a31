@@ -22,6 +22,15 @@
 
 #include <linux/types.h>
 
-#define COMMAND_LINE_SIZE	2048
+#define COMMAND_LINE_SIZE	3072
 
+/* general memory descriptor */
+struct mem_desc {
+	u64 start;
+	u64 size;
+};
+struct dram_info {
+	u32 rank_num;
+	struct mem_desc rank_info[4];
+};
 #endif

@@ -72,6 +72,10 @@
 #include <net/tcp_states.h>
 #include <linux/net_tstamp.h>
 #include <net/smc.h>
+// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA {
+#define NAP_PROCESS_NAME_LEN	128
+#define NAP_DOMAIN_NAME_LEN	255
+// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA }
 
 /*
  * This structure really needs to be cleaned up.
@@ -472,6 +476,18 @@ struct sock {
 #endif
 	struct sock_cgroup_data	sk_cgrp_data;
 	struct mem_cgroup	*sk_memcg;
+	// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA {
+	uid_t			knox_uid;
+	pid_t			knox_pid;
+	uid_t			knox_dns_uid;
+	char 			domain_name[NAP_DOMAIN_NAME_LEN];
+	char			process_name[NAP_PROCESS_NAME_LEN];
+	uid_t			knox_puid;
+	pid_t			knox_ppid;
+	char			parent_process_name[NAP_PROCESS_NAME_LEN];
+	pid_t			knox_dns_pid;
+	char 			dns_process_name[NAP_PROCESS_NAME_LEN];
+	// SEC_PRODUCT_FEATURE_KNOX_SUPPORT_NPA }
 	void			(*sk_state_change)(struct sock *sk);
 	void			(*sk_data_ready)(struct sock *sk);
 	void			(*sk_write_space)(struct sock *sk);
@@ -1691,7 +1707,8 @@ static inline void sk_set_socket(struct sock *sk, struct socket *sock)
 	sk->sk_socket = sock;
 }
 
-static inline wait_queue_head_t *sk_sleep(struct sock *sk)
+static inline wait_queue_head_t __attribute__((no_sanitize("null")))
+	*sk_sleep(struct sock *sk)
 {
 	BUILD_BUG_ON(offsetof(struct socket_wq, wait) != 0);
 	return &rcu_dereference_raw(sk->sk_wq)->wait;
