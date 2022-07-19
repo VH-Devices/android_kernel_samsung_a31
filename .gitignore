@@ -78,6 +78,12 @@ modules.builtin
 !.cocciconfig
 
 #
+# ignore gcc/clang toolchain.
+#
+gcc/
+clang/
+
+#
 # Generated include files
 #
 include/config
