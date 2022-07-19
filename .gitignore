@@ -82,6 +82,7 @@ modules.builtin
 #
 gcc/
 clang/
+a31/
 
 #
 # Generated include files
