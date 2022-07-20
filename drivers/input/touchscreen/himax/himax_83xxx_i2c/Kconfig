@@ -80,7 +80,7 @@ config TOUCHSCREEN_HIMAX_SW_RESET
 # ***************** In-cell End *******************
 
 config TOUCHSCREEN_HIMAX_DEBUG
-        tristate "HIMAX debug function"
+		boolean "HIMAX debug function"
 		depends on TOUCHSCREEN_HIMAX_COMMON
 		help
 		This enables support for HIMAX debug function.
