@@ -3,7 +3,7 @@
 # Written by Hakalle (Velosh) <hakalle@proton.me>.
 
 # Clone GCC & Proton Clang.
-[[ -d "$(pwd)/gcc/" ]] || git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 gcc -b android-9.0.0_r59 --depth 1 >> /dev/null 2> /dev/null
+[[ -d "$(pwd)/gcc/" ]] || git clone https://github.com/VH-Devices/toolchains -b gcc-10.3.0 gcc --depth 1 >> /dev/null 2> /dev/null
 [[ -d "$(pwd)/clang/" ]] || git clone https://github.com/kdrag0n/proton-clang clang --depth 1 >> /dev/null 2> /dev/null
 
 # Export KBUILD_BUILD_{USER,HOST} flags.
@@ -22,7 +22,7 @@ export USE_CCACHE="1"
 $CCACHE -M 50G
 
 # Export toolchain/clang/llvm flags
-export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-linux-android-"
+export CROSS_COMPILE="$(pwd)/gcc/bin/aarch64-buildroot-linux-gnu-"
 export CLANG_TRIPLE="aarch64-linux-gnu-"
 export CC="$(pwd)/clang/bin/clang"
 
