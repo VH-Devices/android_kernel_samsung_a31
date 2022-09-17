@@ -23,15 +23,7 @@ WMT_OPTS += MTK_PLATFORM_WMT=$(MTK_PLATFORM)
 WMT_OPTS += TARGET_BOARD_PLATFORM_WMT=$(TARGET_BOARD_PLATFORM)
 
 $(linked_module): OPTS += $(WMT_OPTS)
-
-else
-        $(warning wmt_drv-MTK_COMBO_SUPPORT: [$(MTK_COMBO_SUPPORT)])
 endif
 endif
-
-else
-# MT76XX
-$(warning skip wmt_drv)
-$(warning wmt_drv-MTK_COMBO_CHIP: [$(MTK_COMBO_CHIP)])
 endif
 endif
