@@ -13,8 +13,7 @@
 				android {
 					compatible = "android,firmware";
 					vbmeta {
-						compatible = "android,vbmeta";
-						parts = "vbmeta,boot,system,vendor,product,odm,prism,optics,vbmeta_samsung,recovery,dtbo,lk,tee1";
+						status = "disabled";
 					};
 					fstab {
 						compatible = "android,fstab";
